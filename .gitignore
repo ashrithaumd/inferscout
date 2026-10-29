@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model weights
+*.safetensors
+*.bin
+*.gguf
+*.pt
+*.pth
+*.ckpt
+
+# Secrets
+.env
+.env.*
+
+# Large result dumps (commit small summaries only)
+experiments/**/results/*
+!experiments/**/results/.gitkeep
+!experiments/**/results/*.md
+*.parquet
+*.pkl
+*.pt.trace.json
+*.nsys-rep
+*.ncu-rep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
