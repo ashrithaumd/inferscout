@@ -14,8 +14,8 @@ from inferscout.fingerprint.device_info import get_device_info
 
 info = get_device_info()
 for key, value in info.items():
-    if key.endswith("_bytes"):
-        value = f"{value / 2**30:.2f} GiB"
+    if key.endswith("_bytes"):  # JSON keeps raw bytes; console shows GiB
+        key, value = key.removesuffix("_bytes") + "_gib", f"{value / 2**30:.2f}"
     print(f"{key:<22} {value}")
 
 gpu = info["gpu_name"].lower().replace(" ", "_")

@@ -1,6 +1,7 @@
 """Identify the GPU PyTorch sees: the first piece of the hardware fingerprint."""
 
 import subprocess
+from datetime import datetime, timezone
 
 import torch
 
@@ -30,6 +31,8 @@ def get_device_info(device: int = 0) -> dict:
         "gpu_name": props.name,
         "total_memory_bytes": total,
         "free_memory_bytes": free,
+        "free_memory_note": "point-in-time snapshot; shared with every process on the GPU",
+        "measured_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "cuda_version": torch.version.cuda,
         "torch_version": torch.__version__,
         "compute_capability": capability,

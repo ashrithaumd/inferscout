@@ -29,6 +29,10 @@ One entry per experiment. Newest at the top.
   - 76%, not 100%: DRAM refresh, read/write turnaround, and ECC check bits sharing the bus.
   - The tight min/max spread means the number is stable, and a copy doesn't push the 70 W power limit.
   - This updates the decode roofline: a 3 GB model is capped at ~80 tok/s per user, not ~106.
+- **Follow-up: repo scripts on a fresh clone (commit fff7a3b):**
+  - **Reproducible:** the repo script measured **241.9 GB/s** vs **242.2 GB/s** from the earlier cell, 0.1% apart. Min/max 4.42 / 4.45 ms. Saved in `results/bandwidth_tesla_t4.json` and `results/fingerprint_tesla_t4.json`.
+  - **Cold-run cause:** this time the cold copy was **236 GB/s**, not 111. The GPU was already busy from earlier runs (clocks up), but the script was a fresh process. So the earlier slow cold run was mostly **clock ramp-up from idle**, not loading. (Likely also why: a plain same-dtype GPU→GPU copy probably runs on the GPU's copy engine, with no kernel to lazy-load at all.)
+  - **Free memory was 13.36 GiB, not 14.46:** another notebook process still held ~1 GiB of tensors. **Free memory is shared across all processes on the GPU**, so it's a point-in-time snapshot. The fingerprint now records `free_memory_note` and `measured_at` on future runs.
 - **Interview-ready one-liner:** "I measured the T4's real memory bandwidth at 242 GB/s, 76% of spec, using CUDA events with warmup and a median of 20 runs. A naive CPU timer reported a physically impossible 9,500 GB/s because GPU launches are asynchronous. The measured number lowered my decode ceiling for a 3 GB model from ~106 to ~80 tokens/sec."
 
 ## 2026-10-29: Device identity check (what PyTorch sees)
