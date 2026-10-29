@@ -13,6 +13,24 @@ One entry per experiment. Newest at the top.
 - **Why:** The explanation for the result, including where my prediction was wrong.
 - **Interview-ready one-liner:** One sentence I could say in an interview.
 
+## 2026-10-29: Memory bandwidth (device-to-device copy)
+
+- **Phase:** 0 (Hardware fingerprint), step 3
+- **Experiment:** Colab T4. Copied a 512 MiB fp16 tensor GPU→GPU, counting read + write (1.07 GB per copy). Measured four ways: a cold first copy, a deliberately wrong CPU timer without sync, and the right way (5 warmups, then 20 CUDA-event timings, take the median, report min/max). Saved as `inferscout/fingerprint/bandwidth.py` + `experiments/phase0/03_bandwidth.py`.
+- **What I predicted:** Wrong CPU timer = absurd (thousands+ GB/s). Right median ≈ 220–250 GB/s, 70–78% of the 320 GB/s spec. Best and median within a few %.
+- **What happened:**
+  - Cold first copy: **111.4 GB/s**
+  - WRONG CPU timer, no sync: **9553 GB/s** (30× faster than physically possible)
+  - RIGHT median: **4.43 ms → 242.2 GB/s = 76% of spec**. Min/max 4.43 / 4.48 ms (~1% spread).
+- **Why:**
+  - All three predictions landed. 242 GB/s is near the top of the predicted range.
+  - The CPU timer only measured how long it took to *queue* the copy. GPU work is asynchronous.
+  - The cold run was under half speed: the GPU was idling at low clocks and had to ramp up, and the copy kernel was loaded lazily on first use (the same lazy loading seen in step 2). One-time costs, not the steady state.
+  - 76%, not 100%: DRAM refresh, read/write turnaround, and ECC check bits sharing the bus.
+  - The tight min/max spread means the number is stable, and a copy doesn't push the 70 W power limit.
+  - This updates the decode roofline: a 3 GB model is capped at ~80 tok/s per user, not ~106.
+- **Interview-ready one-liner:** "I measured the T4's real memory bandwidth at 242 GB/s, 76% of spec, using CUDA events with warmup and a median of 20 runs. A naive CPU timer reported a physically impossible 9,500 GB/s because GPU launches are asynchronous. The measured number lowered my decode ceiling for a 3 GB model from ~106 to ~80 tokens/sec."
+
 ## 2026-10-29: Device identity check (what PyTorch sees)
 
 - **Phase:** 0 (Hardware fingerprint), step 2
@@ -36,7 +54,8 @@ One entry per experiment. Newest at the top.
 - **What happened:** Nothing measured yet. Key ideas:
   - GPU = thousands of simple cores working in parallel. LLMs are mostly matrix multiplications, which parallelize perfectly.
   - Prefill (processing the prompt) is compute-bound, so it drives TTFT. Decode (one token at a time) is memory-bound, so it drives inter-token latency.
-  - Roofline sketch: a 3 GB fp16 model at 320 GB/s gives ~9.4 ms/token, so a ceiling of ~100 tokens/sec.
+  - Roofline sketch: a 3 GB fp16 model at 320 GB/s (spec) gives ~9.4 ms/token, so a ceiling of ~106 tokens/sec.
+  - **Updated after step 3 with measured bandwidth:** 3 GB / 242 GB/s ≈ 12.4 ms/token ≈ **~80 tokens/sec** single-user ceiling. The spec overstated it by ~30%.
 - **Why:**
   - "Decode is memory-bound" applies to a **single user**. With batching, the weights are read once and shared across every request in the batch, which is why concurrency raises total throughput. The ~100 tokens/sec roofline is **per user at batch size 1**, not the GPU's total limit.
   - The T4 is a **70W card** that often can't hold peak clocks under load, so measured TFLOPS may land well below the 65 TFLOPS spec. That's a real finding, not a bug.
