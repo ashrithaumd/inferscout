@@ -31,10 +31,7 @@ env/
 .env
 .env.*
 
-# Large result dumps (commit small summaries only)
-experiments/**/results/*
-!experiments/**/results/.gitkeep
-!experiments/**/results/*.md
+# Large result dumps (small CSV/JSON/MD results ARE committed: they're the write-up's evidence)
 *.parquet
 *.pkl
 *.pt.trace.json
