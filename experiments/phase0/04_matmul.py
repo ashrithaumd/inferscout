@@ -22,14 +22,25 @@ from inferscout.fingerprint.matmul import measure_matmul, sustained_burst
 # fp16: 320 Tensor Cores x 128 ops/clock. fp32: 2560 CUDA cores x 2 ops (FMA)/clock. Turing has no TF32.
 SPEC_TFLOPS = {"float16": 320 * 128 * 1.59e9 / 1e12, "float32": 2560 * 2 * 1.59e9 / 1e12}
 
+MAX_SM_CLOCK_MHZ = 1590  # spec numbers above assume this clock
+
 rows = measure_matmul()
-print(f"{'dtype':<8} {'N':>5} {'median ms':>10} {'min ms':>8} {'max ms':>8} {'TFLOPS':>7} {'% spec':>7}")
+# TFLOPS = median over every run (>= 3 s per size); first20 = median of the first 20 runs (the old method).
+# %clk = TFLOPS vs. the spec scaled down to the median SM clock actually seen: kernel efficiency at that clock.
+print(f"{'dtype':<8} {'N':>5} {'median ms':>10} {'min ms':>8} {'max ms':>8} {'runs':>6} {'TFLOPS':>7} "
+      f"{'first20':>7} {'% spec':>7} {'SM MHz':>7} {'power W':>8} {'temp C':>7} {'% clk':>6}")
 for r in rows:
-    r["pct_of_spec"] = 100 * r["median_tflops"] / SPEC_TFLOPS[r["dtype"]]
+    spec = SPEC_TFLOPS[r["dtype"]]
+    r["pct_of_spec"] = 100 * r["median_tflops"] / spec
+    clk = r["median_sm_clock_mhz"]
+    r["pct_of_clock_peak"] = 100 * r["median_tflops"] / (spec * clk / MAX_SM_CLOCK_MHZ) if clk else None
+    pct_clk = f"{r['pct_of_clock_peak']:.1f}%" if clk else "None"
     print(f"{r['dtype']:<8} {r['n']:>5} {r['median_ms']:>10.3f} {r['min_ms']:>8.3f} {r['max_ms']:>8.3f} "
-          f"{r['median_tflops']:>7.2f} {r['pct_of_spec']:>6.1f}%")
+          f"{r['n_timed']:>6} {r['median_tflops']:>7.2f} {r['first_iters_median_tflops']:>7.2f} "
+          f"{r['pct_of_spec']:>6.1f}% {clk!s:>7} {r['median_power_w']!s:>8} {r['median_temp_c']!s:>7} {pct_clk:>6}")
     # Beating the spec sheet means the timing is broken, not that the GPU is magic.
-    assert r["pct_of_spec"] < 105, f"{r['dtype']} N={r['n']} above spec: timing bug?"
+    assert max(r["median_tflops"], r["first_iters_median_tflops"]) < 1.05 * spec, \
+        f"{r['dtype']} N={r['n']} above spec: timing bug?"
 
 print("\nSustained burst: fp16 N=8192 for 30 s ...")
 burst = sustained_burst()

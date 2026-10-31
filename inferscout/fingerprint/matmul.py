@@ -4,6 +4,7 @@ import statistics
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 
 import torch
 
@@ -25,7 +26,13 @@ def _matrices(n: int, dtype: torch.dtype):
 
 
 def measure_matmul(sizes=(512, 1024, 2048, 4096, 8192), dtypes=(torch.float32, torch.float16),
-                   warmup: int = 5, iters: int = 20) -> list[dict]:
+                   warmup: int = 5, iters: int = 20, min_seconds: float = 3.0,
+                   sample_every_s: float = 0.2) -> list[dict]:
+    """Time each (dtype, N) for at least `iters` runs AND `min_seconds`, sampling nvidia-smi meanwhile.
+
+    min_seconds exists because N=2048's 20 runs finish in ~15 ms, too short for any clock sample.
+    first_iters_median_tflops keeps the old short-burst number so the two can be compared.
+    """
     # Step 3 showed an idle GPU starts at low clocks; spin it up so N=512 isn't timed mid-ramp.
     a, b, c = _matrices(4096, torch.float16)
     for _ in range(50):
@@ -38,7 +45,10 @@ def measure_matmul(sizes=(512, 1024, 2048, 4096, 8192), dtypes=(torch.float32, t
             a, b, c = _matrices(n, dtype)
             for _ in range(warmup):
                 torch.matmul(a, b, out=c)
-            times = [_time(lambda: torch.matmul(a, b, out=c)) for _ in range(iters)]
+            with _smi_background(sample_every_s) as samples:
+                times, t0 = [], time.perf_counter()
+                while len(times) < iters or time.perf_counter() - t0 < min_seconds:
+                    times.append(_time(lambda: torch.matmul(a, b, out=c)))
             median = statistics.median(times)
             flops = 2 * n**3  # n*n outputs, each n multiplies + n adds
             rows.append({
@@ -46,14 +56,25 @@ def measure_matmul(sizes=(512, 1024, 2048, 4096, 8192), dtypes=(torch.float32, t
                 "n": n,
                 "flops": flops,
                 "median_tflops": flops / median / 1e12,
+                "first_iters_median_tflops": flops / statistics.median(times[:iters]) / 1e12,
                 "median_ms": median * 1e3,
                 "min_ms": min(times) * 1e3,
                 "max_ms": max(times) * 1e3,
-                "times_ms": [t * 1e3 for t in times],
+                "n_timed": len(times),
+                "first_times_ms": [t * 1e3 for t in times[:iters]],  # all times would be ~60k floats at N=512
+                "median_sm_clock_mhz": _median(samples, "sm_clock_mhz"),
+                "median_power_w": _median(samples, "power_w"),
+                "median_temp_c": _median(samples, "temp_c"),
+                "smi_samples": samples,
             })
     del a, b, c
     torch.cuda.empty_cache()
     return rows
+
+
+def _median(samples: list[dict], key: str):
+    vals = [s[key] for s in samples if s[key] is not None]
+    return statistics.median(vals) if vals else None
 
 
 def _smi_sample() -> dict:
@@ -71,6 +92,24 @@ def _smi_sample() -> dict:
         return {"sm_clock_mhz": None, "power_w": None, "temp_c": None, "clock_event_reasons": None}
 
 
+@contextmanager
+def _smi_background(every_s: float):
+    """Yield a list that fills with nvidia-smi samples from a thread, so sampling never pauses the GPU."""
+    samples, stop, t0 = [], threading.Event(), time.perf_counter()
+
+    def run():
+        while not stop.wait(every_s):
+            samples.append({"t_s": round(time.perf_counter() - t0, 1), **_smi_sample()})
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    try:
+        yield samples
+    finally:
+        stop.set()
+        thread.join()
+
+
 def sustained_burst(n: int = 8192, dtype: torch.dtype = torch.float16, seconds: float = 30.0,
                     matmuls_per_chunk: int = 10, sample_every_s: float = 1.0) -> dict:
     """Keep the GPU busy for `seconds`; record TFLOPS per chunk and nvidia-smi readings over time."""
@@ -82,19 +121,11 @@ def sustained_burst(n: int = 8192, dtype: torch.dtype = torch.float16, seconds: 
             torch.matmul(a, b, out=c)
 
     before = _smi_sample()
-    samples, stop, t0 = [], threading.Event(), time.perf_counter()
-
-    def sampler():  # separate thread so sampling never pauses the GPU
-        while not stop.wait(sample_every_s):
-            samples.append({"t_s": round(time.perf_counter() - t0, 1), **_smi_sample()})
-
-    thread = threading.Thread(target=sampler, daemon=True)
-    thread.start()
-    chunks = []
-    while (t := time.perf_counter() - t0) < seconds:
-        chunks.append({"t_s": round(t, 1), "tflops": flops / _time(chunk) / 1e12})
-    stop.set()
-    thread.join()
+    t0 = time.perf_counter()
+    with _smi_background(sample_every_s) as samples:
+        chunks = []
+        while (t := time.perf_counter() - t0) < seconds:
+            chunks.append({"t_s": round(t, 1), "tflops": flops / _time(chunk) / 1e12})
     after = _smi_sample()
 
     del a, b, c
