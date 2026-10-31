@@ -1,7 +1,7 @@
 """Phase 0, step 4: measure matmul throughput (TFLOPS) in fp32 and fp16, plus a 30 s sustained burst.
 
-Saves results/matmul_<gpu>.json (every timing and nvidia-smi sample) and adds
-matmul_fp16_tflops / matmul_fp32_tflops to results/fingerprint_<gpu>.json.
+Saves results/matmul_<gpu>.json (timings and nvidia-smi samples) and adds burst_fp16_tflops,
+sustained_fp16_tflops, sustained_fp32_tflops and burst_start_temp_c to results/fingerprint_<gpu>.json.
 Run from the repo root: python experiments/phase0/04_matmul.py
 """
 
@@ -57,7 +57,13 @@ results = ROOT / "experiments/phase0/results"
 gpu = torch.cuda.get_device_name().lower().replace(" ", "_")
 (results / f"matmul_{gpu}.json").write_text(
     json.dumps({"spec_tflops": SPEC_TFLOPS, "sweep": rows, "burst": burst}, indent=2))
-best = {d: max(r["median_tflops"] for r in rows if r["dtype"] == d) for d in SPEC_TFLOPS}
+# burst: best first-20 median, before the power cap clamps the clock (depends on what ran just before).
+# sustained: the regime of a loaded server. N >= 2048 because smaller fp32 sizes never reach the cap.
+burst_fp16 = max(r["first_iters_median_tflops"] for r in rows if r["dtype"] == "float16")
+sustained_fp32 = max(r["median_tflops"] for r in rows if r["dtype"] == "float32" and r["n"] >= 2048)
 update_fingerprint(results / f"fingerprint_{gpu}.json",
-                   matmul_fp16_tflops=round(best["float16"], 2), matmul_fp32_tflops=round(best["float32"], 2))
+                   burst_fp16_tflops=round(burst_fp16, 2),
+                   sustained_fp16_tflops=round(statistics.median(tf[-k:]), 2),
+                   sustained_fp32_tflops=round(sustained_fp32, 2),
+                   burst_start_temp_c=burst["before"]["temp_c"])
 print(f"\nSaved results/matmul_{gpu}.json and updated results/fingerprint_{gpu}.json")

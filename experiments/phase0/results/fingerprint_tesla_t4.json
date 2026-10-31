@@ -12,7 +12,8 @@
   "power_limit_w": 70.0,
   "max_sm_clock_mhz": 1590,
   "memory_bandwidth_gbps": 241.9,
-  "matmul_fp16_tflops": 23.34,
-  "matmul_fp32_tflops": 4.05,
-  "sustained_fp16_tflops": 21.11
+  "burst_fp16_tflops": 31.98,
+  "sustained_fp16_tflops": 20.52,
+  "sustained_fp32_tflops": 3.89,
+  "burst_start_temp_c": 68
 }

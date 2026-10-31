@@ -84,6 +84,7 @@ InferScout compares the cost per request of the recommended self-hosted config w
 
 ### Phase 3: Predictor
 - Roofline model: predict prefill and decode latency from model size, sequence lengths, batch size, and the Phase 0 fingerprint.
+- Use the **sustained** compute numbers (`sustained_fp16_tflops`, `sustained_fp32_tflops`) for a loaded server. On a 70 W T4 the power cap holds the clock near 600 MHz under steady load. Treat `burst_fp16_tflops` only as an upper bound for a single request on an idle, cool GPU.
 - Compare predictions with Phase 1 measurements and report the error.
 - **Output:** a predictor with a documented error.
 
