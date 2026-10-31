@@ -13,6 +13,33 @@ One entry per experiment. Newest at the top.
 - **Why:** The explanation for the result, including where my prediction was wrong.
 - **Interview-ready one-liner:** One sentence I could say in an interview.
 
+## 2026-10-31: Matmul throughput (fp32 / fp16 sweep + 30 s sustained burst)
+
+- **Phase:** 0 (Hardware fingerprint), step 4
+- **Experiment:** Colab T4, commit fdb6083. Square matmuls N = 512–8192 in fp32 and fp16 (no bf16 on T4). Same timing as step 3: spin-up, 5 warmups, 20 CUDA-event timings, median plus min/max. FLOPs = 2·N³. Then fp16 N=8192 for 30 s, recording TFLOPS for each chunk of 10 matmuls and nvidia-smi clock/power/temp/reasons about once a second. Saved as `inferscout/fingerprint/matmul.py` + `experiments/phase0/04_matmul.py`.
+- **What I predicted:** fp32 ≈ 2.5–3.5 TFLOPS at N=512, then ~4–4.5 (~55% of 8.14 spec). fp16 ≈ 5–8 at N=512, 15–18 at 1024, 22–27 for 2048+, best ~25–28 (~40% of 65 spec). Under the burst: power-capped (reason 0x4) at **1000–1300 MHz**, TFLOPS falling 5–10% as the card heats up.
+- **What happened:**
+
+  | N | fp32 TFLOPS | % of 8.14 | fp16 TFLOPS | % of 65.1 |
+  |---|---|---|---|---|
+  | 512 | 2.63 | 32.4% | 5.38 | 8.3% |
+  | 1024 | 4.00 | 49.2% | 16.51 | 25.3% |
+  | 2048 | 3.91 | 48.0% | **23.34** | 35.8% |
+  | 4096 | **4.05** | 49.8% | 21.44 | 32.9% |
+  | 8192 | 3.78 | 46.5% | 22.53 | 34.6% |
+
+  - Burst: **22.17 → 21.11 TFLOPS** (first vs last 20%, −4.8%), min/max 20.83 / 22.82, 60 chunks.
+  - Clocks: **SM 570–630 MHz (mostly 585–615), ~37% of the 1590 max.** Power 65–69.4 W, temp 62 → 73 °C, reason **0x4 (software power cap) the whole time**. Before: 1050 MHz / 69.4 W, already capped from the sweep. After: 720 MHz / 65.2 W.
+- **Why:**
+  - The size curve matched: small matmuls can't fill 40 SMs, launch overhead dominates a ~50 µs kernel, and fp16 at N=512 is below even the spec ridge point (intensity N/3 ≈ 170 < 269 FLOPs/byte). fp32 sizes all land within ~0.3 TFLOPS of the prediction.
+  - **The clock prediction was far off (predicted 1000–1300, got ~600 MHz).** Running Tensor Cores at full rate is the most power-dense work the chip does. At 70 W, the only way to stay under the cap is to cut the clock by roughly 2.6×.
+  - **Clock-adjusted peak:** 320 Tensor Cores × 128 fp16 FLOPs/clock × 0.6 GHz = **24.6 TFLOPS** (24.0–25.2 for 585–615 MHz). The burst delivered 21.1–22.2, which is **~86–90% of the peak at the actual clock**. cuBLAS is efficient; **the 70 W power budget is the bottleneck**, and it costs ~63% of spec.
+  - fp32 hit 4.05 TFLOPS, which needs at least 4.05 / (2560 × 2) ≈ **0.79 GHz** even at 100% efficiency. So fp32 ran at a higher clock than fp16. CUDA-core math draws less power than Tensor Cores at full rate. (Inferred; clocks weren't sampled during the sweep.)
+  - The −4.8% burst slide tracks the 62 → 73 °C rise: hotter silicon leaks more power, which leaves less of the 70 W for math.
+  - **fp16 N=4096 (21.4) below N=2048 (23.3):** fits a "short runs finish before the power controller fully clamps" story (all of N=2048's timed work takes ~15 ms, N=4096's ~130 ms). But N=8192 runs longest and still beat 4096 (22.5), so the data doesn't prove it. A ~5–8% gap is also in range for cuBLAS kernel/tile choice. Not settled without clocks sampled per size.
+  - **Roofline update:** the measured ridge point is 23.3 TFLOPS / 241.9 GB/s ≈ **96 FLOPs/byte** (≈ 87 at the sustained 21.1), down from 269 on spec. Phase 3 must use measured TFLOPS for prefill: spec-based TTFT would come out ~3× too optimistic. Batched fp16 decode, which does about B FLOPs per weight byte at batch B, crosses into compute-bound at **batch ≈ 90–100, not ~270**, so throughput stops scaling with concurrency much sooner than the spec suggests.
+- **Interview-ready one-liner:** "On a T4, fp16 matmul peaked at 23 TFLOPS, only 36% of the 65 TFLOPS spec. nvidia-smi showed the 70 W power cap pinning the clock near 600 MHz, and at that clock cuBLAS was ~88% efficient. So the gap was power, not kernel quality, and it shrinks the roofline ridge point from 269 to ~96 FLOPs/byte."
+
 ## 2026-10-29: Memory bandwidth (device-to-device copy)
 
 - **Phase:** 0 (Hardware fingerprint), step 3
@@ -60,6 +87,7 @@ One entry per experiment. Newest at the top.
   - Prefill (processing the prompt) is compute-bound, so it drives TTFT. Decode (one token at a time) is memory-bound, so it drives inter-token latency.
   - Roofline sketch: a 3 GB fp16 model at 320 GB/s (spec) gives ~9.4 ms/token, so a ceiling of ~106 tokens/sec.
   - **Updated after step 3 with measured bandwidth:** 3 GB / 242 GB/s ≈ 12.4 ms/token ≈ **~80 tokens/sec** single-user ceiling. The spec overstated it by ~30%.
+  - **Updated after step 4 with measured compute:** ridge point = 23.3 TFLOPS / 241.9 GB/s ≈ **96 FLOPs/byte** (spec: ~269). Prefill must be predicted with ~21–23 TFLOPS, not 65.
 - **Why:**
   - "Decode is memory-bound" applies to a **single user**. With batching, the weights are read once and shared across every request in the batch, which is why concurrency raises total throughput. The ~100 tokens/sec roofline is **per user at batch size 1**, not the GPU's total limit.
   - The T4 is a **70W card** that often can't hold peak clocks under load, so measured TFLOPS may land well below the 65 TFLOPS spec. That's a real finding, not a bug.

@@ -1,7 +1,9 @@
 {
   "gpu_name": "Tesla T4",
   "total_memory_bytes": 15637086208,
-  "free_memory_bytes": 14344323072,
+  "free_memory_bytes": 15527116800,
+  "free_memory_note": "point-in-time snapshot; shared with every process on the GPU",
+  "measured_at": "2026-10-29T23:54:26+00:00",
   "cuda_version": "13.0",
   "torch_version": "2.11.0+cu130",
   "compute_capability": [7, 5],
@@ -9,5 +11,8 @@
   "ecc_mode": "Enabled",
   "power_limit_w": 70.0,
   "max_sm_clock_mhz": 1590,
-  "memory_bandwidth_gbps": 241.9
+  "memory_bandwidth_gbps": 241.9,
+  "matmul_fp16_tflops": 23.34,
+  "matmul_fp32_tflops": 4.05,
+  "sustained_fp16_tflops": 21.11
 }

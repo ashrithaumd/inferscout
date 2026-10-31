@@ -1,6 +1,6 @@
 # InferScout
 
-> **Status: early development.** The repo is scaffolded and Phase 0 has not started yet. No results so far.
+> **Status: early development.** Phase 0 (hardware fingerprint) is in progress on a free Colab T4.
 
 InferScout recommends the cheapest way to serve an open LLM that still meets your **latency, budget, and quality** limits. It then checks that recommendation against real benchmarks. It targets small GPUs (NVIDIA T4, L4) and small open models (0.5B–3B parameters, such as Qwen and Llama 3.2, including their AWQ/GPTQ versions).
 
@@ -20,7 +20,7 @@ Tools such as BentoML's llm-optimizer and NVIDIA's AIConfigurator already find f
 
 | Phase | Name | Description | Status |
 |---|---|---|---|
-| 0 | Hardware fingerprint | PyTorch microbenchmarks: matmul throughput, memory bandwidth, GPU memory | Not started |
+| 0 | Hardware fingerprint | PyTorch microbenchmarks: matmul throughput, memory bandwidth, GPU memory | In progress |
 | 1 | Benchmark harness | vLLM × concurrency × quantization across workload profiles (chat, long-prompt RAG, batch). Measures TTFT, inter-token latency, p50/p95, throughput, peak GPU memory | Not started |
 | 2 | Quality eval | Accuracy for each quantization setting | Not started |
 | 3 | Predictor | Roofline model built from the fingerprint, with prediction error vs. measured results | Not started |
